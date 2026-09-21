@@ -1,0 +1,165 @@
+# System Diagrams
+
+## Architecture Diagram
+
+This diagram illustrates the high-level architecture of the multi-agent system based on the `app/` structure and schemas.
+
+```mermaid
+graph TD
+    subgraph Entrypoints [UI / Entrypoints]
+        CLI_Ask["ask.py (CLI User Input)"]
+        CLI_Worker["worker.py (Background Job Poller)"]
+        CLI_Demo["demo.py (Self-contained Demo)"]
+    end
+
+    subgraph Orchestration [Orchestration & Agents]
+        Runner["app/runner.py (execute_run loop)"]
+        Worker["app/worker.py (Background Daemon)"]
+        Agents["app/agents.py (Supervisor, Info, Desk Agents)"]
+        Tools["app/tools/hostel_tools.py (Specialized Tool Actions)"]
+    end
+
+    subgraph DataAccess [Data Access Layer]
+        RunStore["app/memory.py (RunStore - Queue & State)"]
+        HostelDB["app/hostel_db.py (Business Logic DAO)"]
+    end
+
+    subgraph DBs [Databases]
+        AgentDB[("agent.db Schema: agent.sql")]
+        BusinessDB[("hostel.db Schema: hostel.sql")]
+    end
+
+    CLI_Ask -->|Enqueues Request| RunStore
+    CLI_Worker -->|Starts| Worker
+    Worker -->|Claims Job| RunStore
+    Worker -->|Passes Job| Runner
+    Runner -->|Loads Context| RunStore
+    Runner -->|Invokes| Agents
+    Agents -->|Delegates to/Calls| Tools
+    Tools -->|Reads/Writes| HostelDB
+    Runner -->|Saves State| RunStore
+    
+    RunStore -->|Reads/Writes| AgentDB
+    HostelDB -->|Reads/Writes| BusinessDB
+```
+
+## Database Entity-Relationship (ER) Diagrams
+
+### `agent.db` Schema (State & Job Queue)
+
+```mermaid
+erDiagram
+    thread {
+        TEXT id PK
+        TEXT student_id
+        TEXT created_at
+    }
+    
+    message {
+        INTEGER id PK
+        TEXT thread_id FK
+        INTEGER seq
+        TEXT role
+        TEXT text
+        TEXT created_at
+    }
+
+    run {
+        TEXT id PK
+        TEXT thread_id FK
+        TEXT status
+        TEXT model
+        INTEGER tokens_in
+        INTEGER tokens_out
+        INTEGER attempts
+        INTEGER max_attempts
+        REAL available_at
+        TEXT lease_owner
+        REAL lease_until
+        INTEGER cancel_requested
+        TEXT error_code
+        TEXT created_at
+        TEXT started_at
+        TEXT finished_at
+    }
+
+    run_step {
+        INTEGER id PK
+        TEXT run_id FK
+        INTEGER seq
+        TEXT kind
+        INTEGER tokens_in
+        INTEGER tokens_out
+        TEXT text
+        TEXT tool_calls
+        TEXT created_at
+    }
+
+    tool_call {
+        INTEGER id PK
+        INTEGER run_step_id FK
+        TEXT tool_name
+        TEXT args
+        TEXT result
+        INTEGER ok
+        INTEGER latency_ms
+        TEXT idempotency_key
+        TEXT created_at
+    }
+
+    thread ||--o{ message : "contains"
+    thread ||--o{ run : "has"
+    run ||--o{ run_step : "executes"
+    run_step ||--o| tool_call : "triggers"
+```
+
+### `hostel.db` Schema (Business Data)
+
+```mermaid
+erDiagram
+    room {
+        INTEGER id PK
+        TEXT block
+        TEXT number
+    }
+
+    student {
+        INTEGER id PK
+        TEXT roll_no UK
+        TEXT name
+        INTEGER room_id FK
+        INTEGER warnings
+    }
+
+    complaint {
+        INTEGER id PK
+        INTEGER room_id FK
+        TEXT issue
+        TEXT status
+        TEXT warden_assigned
+        REAL created_at
+    }
+
+    policy {
+        TEXT name PK
+        INTEGER value
+    }
+
+    notification {
+        INTEGER id PK
+        TEXT roll_no
+        TEXT message
+        TEXT dedupe_key UK
+        REAL created_at
+    }
+
+    idempotency {
+        TEXT key PK
+        TEXT tool_name
+        TEXT result
+        REAL created_at
+    }
+
+    room ||--o{ student : "houses"
+    room ||--o{ complaint : "has"
+```
